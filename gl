@@ -1,0 +1,135 @@
+#
+# bash command: gl
+# Function that combines git branch with git stash list to
+# show the branches with their associated saved stashes.
+#
+
+#
+# function: determine_behind_ahead
+# Function that determines how far behind/ahead a branch is
+# and outputs text accordingly.
+#
+function determine_behind_ahead() {
+  if [ -z "$1" ]; then
+    printf "[-/-]"
+  fi
+
+  ba=($(git rev-list --left-right --count master...${1}))
+  behind=${ba[0]}
+  ahead=${ba[1]}
+
+  printf "[${YELLOW}%s${WHITE}/${YELLOW}%s${WHITE}] " $behind $ahead
+}
+
+#
+# function: search_stash_for_branch
+# Function takes a text list and searches for a branch name
+# so it can be used in output.
+#
+# Arguments:
+# $1 - branch
+# $2 - search criteria
+#
+function search_stash_for_branch() {
+  declare -a branchmatch
+
+  shopt -s nocasematch
+  set -f
+
+  stash=$(git stash list | egrep "${1}")
+  while read -r b <&9;
+  do
+    case "$2" in
+      "on")
+        if [[ "${b}" =~ "${1}:" ]]; then
+          branchmatch+=($1)
+        fi
+        ;;
+      "as")
+        if [[ "${b}" =~ ": ${1}" ]]; then
+          branchmatch+=($1)
+        fi
+        ;;
+    esac
+  done 9<<< "$stash"
+  # Output text to the screen.
+  if [ ${#branchmatch[@]} -gt 0 ]; then
+    if [ "${2}" = "as" ]; then
+      printf "(labelled as "
+    else
+      printf "(on "
+    fi
+    for i in $branchmatch; do
+      printf "${GREEN}%s${WHITE}" "$(IFS=', '; echo "${branchmatch[*]}")"
+    done
+
+    if [[ "${2}" = "on" ]]; then
+      printf " ${YELLOW}[%d]${WHITE}) " "${#branchmatch[@]}"
+    else
+      printf ")"
+    fi
+  fi
+
+  set +f
+}
+
+function gl() {
+  declare -a branchmatch
+
+  shopt -s nocasematch
+  set -f
+
+  # We want to check this is a repository
+  if [ ! -d "$(git rev-parse --show-toplevel)/.git" ]; then
+    printf "This is not a working git repository"
+    return 1
+  fi
+
+  branches=$(git branch)
+  current=$(git rev-parse --abbrev-ref HEAD)
+  stash=$(git stash list)
+
+  printf "Current git branch list:\n"
+
+  # Loop through our git branches
+  for b in ${branches}
+  do
+    br=${b}
+    branch_number=${b//[!0-9]}
+
+    # We need to know which is our current branch
+    if [[ "$b" =~ "*" ]]; then
+      continue
+    # We need to know which is the master branch
+    elif [[ "$b" == "master" ]]; then
+      if [ "${current}" = "master" ]; then
+        printf "  ${YELLOW}*$b${WHITE} "
+      else
+            printf "  master "
+      fi
+      continue
+    # This ($b) is the current branch
+    else
+      if [ "${current}" = "${b}" ]; then
+        printf " ${YELLOW}*$b${WHITE} ($branch_number) "
+      else
+        printf "  $b ($branch_number) "
+      fi
+    fi
+
+    # Determine behind/ahead status of branch
+    determine_behind_ahead "${b}"
+
+    # Search the branches. This should append the branch
+    # matches to the output string for us.
+    search_stash_for_branch "${br}" "on"
+
+    # Search the stash names.
+    search_stash_for_branch "${branch_number}" "as"
+
+    printf "\n"
+  done
+  printf "\n"
+
+  set +f
+}
